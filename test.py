@@ -39,6 +39,12 @@ def overhead():
 			sys.exit(0)
 """
 today = datetime.now()
+#Get default date
+yy = today.year
+mm = today.month
+dd = today.day
+def_date = str(yy) + "-" + str(mm) + "-" + str(dd)
+print("DEFDATE: " + def_date)
 
 argp = argparse.ArgumentParser(description="Program for observing space debris relative to a launch position")
 #argp.add_argument("-y", "--year", type=int, default=today.year)
@@ -46,14 +52,48 @@ argp = argparse.ArgumentParser(description="Program for observing space debris r
 #argp.add_argument("-d", "--day", type=int, default=today.day)
 #argp.add_argument("--hour", type=int, default=today.hour)
 #argp.add_argument("-m", "--minute", type=int, default=today.minute)
-argp.add_argument("-d", "--date", help="Date of launch (YYYY-MM-DD)")
-argp.add_argument("-t", "--time", help="Time of launch (0000-2359)")
+argp.add_argument("-d", "--date", help="Date of launch (YYYY-MM-DD)", default=def_date)
+argp.add_argument("-t", "--time", help="Time of launch (0000-2359)", default="0000")
 parsed=argp.parse_args()
 #year = parsed.year
 #month = parsed.month
 #day = parsed.day
 #print(str(year) + str(month) + str(day))
 #overhead()
+
+#Verify that the date is properly formatted
+date = parsed.date
+date_arr = date.split('-')
+if len(date_arr) != 3 or len(date_arr[0]) != 4 or (len(date_arr[1]) > 2 or len(date_arr[1]) < 1) or (len(date_arr[2]) > 2 or len(date_arr[2]) < 1):
+	print("[-] Date format incorrect!")
+	sys.exit(0)
+else:
+	#Assuming there are a correct number of date inputs, validate inputs are numbers
+	for num in date_arr:
+		if not (num.isdigit()):
+			print("[-] Incorrect date entry")
+			sys.exit(0)
+	yr = int(date_arr[0])
+	month = int(date_arr[1])
+	day = int(date_arr[2])
+	if month > 12 or month < 1:
+		print("[-] Month doesn't exist")
+		sys.exit(0)
+	#Account for leap years
+	if month == 2 and yr % 4 == 0 and (day > 29 or day < 1):
+		print("[-] Day doesn't exist")
+		sys.exit(0)
+	#Account for February on non-leap years
+	elif month == 2 and yr % 4 != 0 and (day > 28 or day < 1):
+		print("[-] Day doesn't exist")
+		sys.exit(0)
+	elif month % 2 == 0 and (day > 30 or day < 1):
+		print("[-] Day doesn't exist")
+		sys.exit(0)
+	elif month % 2 == 1 and (day > 31 or day < 1):
+		print("[-] Day doesn't exist")
+		sys.exit(0)
+print(str(yr) + " " + str(month) + " " + str(day))
 
 #Initiate some variables to be used in the construction of Earth's representation
 halfpi, pi, twopi = [f*np.pi for f in (0.5, 1, 2)]
@@ -80,7 +120,7 @@ L1, L2 = TLE.splitlines()
 #Give options for year, month, day
 #minutes = np.arange(60. * 24 * 7)         # (7) days
 minutes = np.arange(60. * 24 * 1)         # (1) day
-time = ts.utc(2018, 6, 1, 0, minutes)  # start June 1, 2018
+time = ts.utc(yr, month, day, 0, minutes)  # start June 1, 2018
 #time = ts.now()
 
 ISS = EarthSatellite(L1,L2)
