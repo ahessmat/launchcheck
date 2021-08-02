@@ -14,18 +14,38 @@ import requests	#needed to query CelesTrak
 from math import radians,cos,sin,asin,sqrt
 from tqdm import tqdm	#Added for loading bar
 
-#Function for calculating the distance between 2 points given their latitudes/longtitudes
-def haversine(lat1,lon1,lat2,lon2):
-	R = 6372.8	#Earth radius km
-	dLat = radians(lat2 - lat1)
-	dLon = radians(lon2 - lon1)
-	lat1 = radians(lat1)
-	lat2 = radians(lat2)
+#TODO
+#Implement function that returns text of color
+#Colors
+#{'#bcbd22', '#d62728', '#17becf', '#7f7f7f', '#ff7f0e', '#2ca02c', '#1f77b4', '#e377c2', '#9467bd', '#8c564b'}
+def getColor(code):
+	colorcode = {
+		'#bcbd22' : "YELLOW",	#Sick yellow
+		'#d62728' : "RED",	#Red
+		'#17becf' : "CYAN",	#Teal
+		'#7f7f7f' : "GREY",	#Grey
+		'#ff7f0e' : "ORANGE",	#Orange
+		'#2ca02c' : "GREEN",	#Forest Green
+		'#1f77b4' : "BLUE",	#Blue
+		'#e377c2' : "PINK",	#Pink
+		'#9467bd' : "PURPLE",	#Purple
+		'#8c564b' : "BROWN"	#Brown
+	}
+	return colorcode[code]
 
-	a = sin(dLat/2)**2 + cos(lat1)*cos(lat2)*sin(dLon/2)**2
-	c = 2*asin(sqrt(a))
+	
 
-	return R*c
+
+#Function for calculating the distance between 2 points given their latitudes/longtitudes (haversine)
+def hav2(lat1,lon1,lat2,lon2):
+	lon1,lat1,lon2,lat2 = map(np.radians, [lon1,lat1,lon2,lat2])
+	dlon = lon2 - lon1
+	dlat = lat2 - lat1
+	a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
+	c = 2 * np.arcsin(np.sqrt(a))
+	km = 6367 * c
+	return km
+
 
 #References
 #https://space.stackexchange.com/questions/27688/how-do-i-determine-the-ground-track-period-of-a-leo-satellite
@@ -162,13 +182,16 @@ plt.scatter(slong,slat)
 plt.annotate(siteName, (slong,slat))
 
 #active_sats = requests.get("http://celestrak.com/NORAD/elements/iridium-33-debris.txt")
-#active_sats = requests.get("http://celestrak.com/NORAD/elements/active.txt")
+active_sats = requests.get("http://celestrak.com/NORAD/elements/active.txt")
 
-#tle1 = active_sats.text.splitlines()
+tle1 = active_sats.text.splitlines()
 
-tle1 = """ISS
-1 25544U 98067A   18157.92534723  .00001336  00000-0  27412-4 0  9990
-2 25544  51.6425  69.8674 0003675 158.7495 276.7873 15.54142131116921""".splitlines()
+#tle1 = """ISS
+#1 25544U 98067A   18157.92534723  .00001336  00000-0  27412-4 0  9990
+#2 25544  51.6425  69.8674 0003675 158.7495 276.7873 15.54142131116921""".splitlines()
+
+#Using list instead of dictionary, since there could be similar distances or names in data
+tracker = []
 
 for idx,line in enumerate(tqdm(tle1)):
 	if idx%3 == 0:
@@ -177,12 +200,13 @@ for idx,line in enumerate(tqdm(tle1)):
 		L2 = tle1[idx+2]
 
 		#minutes = np.arange(60. * 24 * 1)         # (1) day
-		time = ts.utc(yr, month, day, hour, range(minute-5,minute+5))  # start June 1, 2018
+		time = ts.utc(yr, month, day, hour, range(minute,minute+10))  # start June 1, 2018
 		#time = ts.utc(yr, month, day, hour, minute)
 
 		satl = EarthSatellite(L1,L2)
 		satlloc = satl.at(time)
 		satl_alt = satlloc.distance().km - 6371	#Get satellite altitude by subtracing earth's mean radius (km)
+		#Scrub satellites that are above destination altitude
 		if LEO and satl_alt.all() > 2000:
 			continue
 		if MEO and satl_alt.all() > 36786:
@@ -195,11 +219,22 @@ for idx,line in enumerate(tqdm(tle1)):
 		lon, lat    = lon[:-1], lat[:-1]
 		lon[breaks] = np.nan
 
+		#Calculate distance between ground plot and launch site using haversine formula
+		distances = hav2(lat,lon,slat,slong)
+		closest_km = np.nanmin(distances)
+		idx_closest_km = np.nanargmin(distances)
+		timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
+
+		#print(distances)
+		#print(np.nanmin(distances))
+		#print(np.nanargmin(distances))
 		#t = haversine(lat,lon,slat,slong)
 		#print(t)
-		plt.plot(lon,lat, label=name)
+		p = plt.plot(lon,lat, label=name)
+		color = getColor(p[-1].get_color())
 
 		#"""
+		#Scrub ground tracks that do not appear within our mappable window
 		#Check the first longtitude
 		if np.isnan(lon[0]) or lon[0] < m.llcrnrlon or lon[0] > m.urcrnrlon:
 			end = lon[len(lon)-1]
@@ -213,15 +248,28 @@ for idx,line in enumerate(tqdm(tle1)):
 			if np.isnan(end) or end < m.llcrnrlat or end > m.urcrnrlat:
 				continue
 		#"""
-		
+		tracker.append((name,closest_km,timestamp,color, satl_alt[idx_closest_km]))
 		#plt.scatter(lon,lat)
 	else:
 		continue
 
 ###################
 
-#x, y = m(-122.3, 47.6)
-#plt.plot(x, y, 'ok', markersize=5)
-#plt.text(x, y, ' Seattle', fontsize=12);
-#plt.legend()
+
+#This block of code sorts the groundtracks that are visible in the plot and highlights the "near miss" incidents
+sortedTracker = sorted(tracker, key = lambda x: x[1])
+dist = 0
+idx = 0
+print("The following near misses will occur:")
+while dist < 200:
+	name = sortedTracker[idx][0]
+	closest = str(round(sortedTracker[idx][1], 2))
+	time = sortedTracker[idx][2]
+	color = sortedTracker[idx][3]
+	altitude = str(round(sortedTracker[idx][4], 2))
+	print(name + " passes within " +  closest + "km of the launch destination at " + time + " with altitude " + altitude + ". Plot color: " + color)
+	idx += 1
+	dist = sortedTracker[idx][1]
+#print(sortedTracker)
+
 plt.show()
