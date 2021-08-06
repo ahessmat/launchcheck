@@ -52,6 +52,19 @@ def haversine(lat1,lon1,lat2,lon2):
 	km = 6367 * c
 	return km
 
+def siteSelect(s):
+	#LATITUDE, LONGITUTE, SITENAME
+	sites = {
+		"1" : (34.7373367,-120.5843126, "Vandenberg"),	#Vandenberg
+		"2" : (28.396837,-80.605659, "Cape Canaveral"),	#Cape Canaveral
+		"3" : (110.951133,19.614492, "Wengchang Space Launch Site"),
+		"4" : (63.305000,45.965000, "Baikonur Cosmodrome"),
+		"5" : (80.230425,13.719939, "Satish Dhawan Space Centre")
+	}
+	#slat,slong,siteName = sites[s]
+	#return (slat,slong,siteName)
+	return(sites[s])
+
 def processRequest():
 	yr = 2022
 	month = 12
@@ -206,12 +219,22 @@ while True:
 				data = conn.recv(1024)
 				msg += data.decode()
 				#if data.decode() == "Hello!":
-				if "\r\n\r\n" in msg:
-					print(msg)
-					print("END")
+				#if "\r\n\r\n" in msg:
+					#print(msg)
+					#print("END")
 				if not data:
 					print((datetime.now() - s_time).total_seconds())
-					processRequest()
+					print(msg)
+					client_msg = msg.split(" ")
+					myr = client_msg[0]
+					mmonth = client_msg[1]
+					mday = client_msg[2]
+					mhour = client_msg[3]
+					mmin = client_msg[4]
+					msite = client_msg[5]
+					morbit = client_msg[6]
+					print(siteSelect(msite))
+					#processRequest()
 					break
 				conn.sendall(data)
 
