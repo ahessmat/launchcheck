@@ -19,6 +19,8 @@ PORT = 10001
 data = load('de421.bsp')	#skyfield intuits that it needs to download this file; see "Ephemeris download links"
 ts = load.timescale()
 earth = data['earth']
+#Database lock
+dbLOCK = threading.Lock()
 
 #TODO
 #implement multi-threaded calls to celestrak
@@ -65,7 +67,8 @@ def siteSelect(s):
 	#return (slat,slong,siteName)
 	return(sites[s])
 
-def processRequest():
+def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
+	"""
 	yr = 2022
 	month = 12
 	day = 15
@@ -76,6 +79,19 @@ def processRequest():
 	siteName = "Cape Canaveral"
 	LEO = False
 	MEO = False
+	"""
+	yr = int(myr)
+	month = int(mmo)
+	day = int(mday)
+	hour = int(mhour)
+	minute = int(mmin)
+	slat,slong,siteName = siteSelect(msite)
+	LEO = False
+	MEO = False
+	if morbit == "LEO":
+		LEO = True
+	if morbit == "MEO":
+		MEO = True
 	
 	#Setup the figure
 	fig = plt.figure(figsize=(10,8))
@@ -196,6 +212,14 @@ end = time.time()
 
 print(end - start)
 
+def updateDatabase():
+	dbLOCK.acquire()
+	try:
+		print("LOCK ACQUIRED")
+	finally:
+		print("LOCK RELEASED")
+		dbLOCK.release()
+
 """
 for satlist in celestrak_lists:
 	req = requests.get("http://celestrak.com/NORAD/elements/" + satlist + ".txt")
@@ -205,6 +229,13 @@ print("DONE")
 
 """
 
+def testDB():
+	while True:
+		updateDatabase()
+		time.sleep(5)
+
+#db_thread = threading.Timer(10.0, updateDatabase).start()
+db_thread = threading.Thread(target=testDB).start()
 s_time = datetime.now()
 while True:
 	print("TEST")
@@ -234,6 +265,7 @@ while True:
 					msite = client_msg[5]
 					morbit = client_msg[6]
 					print(siteSelect(msite))
+					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
 					#processRequest()
 					break
 				conn.sendall(data)
