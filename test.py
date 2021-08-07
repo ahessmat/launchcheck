@@ -67,6 +67,8 @@ def siteSelect(s):
 	#return (slat,slong,siteName)
 	return(sites[s])
 
+dicQ = Queue()
+plotQ = Queue()
 def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 	"""
 	yr = 2022
@@ -101,6 +103,28 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 	plt.scatter(slong,slat)
 	plt.annotate(siteName, (slong,slat))
 
+	#####################
+	#MULTITHREADING
+	#####################
+
+	print("[+] Processing request")
+	for tle in dic.values():
+		dicQ.put(tle)
+	for x in tqdm(range(10)):
+		thread = threading.Thread(target = threadtask, args=[yr,month,day,hour,minute,LEO,MEO,m,slat,slong])
+		#thread.daemon = True
+		thread.start()
+		thread.join()
+	print("[+] Plotting to figure")
+	while not plotQ.empty():
+		lon,lat,name = plotQ.get()
+		p = plt.plot(lon,lat, label=name)
+		color = getColor(p[-1].get_color())
+	#####################
+	#MULTITHREADING
+	#####################
+
+	"""
 	for tle in tqdm(dic.values()):
 		name = tle[0]
 		L1 = tle[1]
@@ -156,7 +180,58 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 
 		#tracker.append((name,closest_km,timestamp,color, satl_alt[idx_closest_km]))
 		#plt.scatter(lon,lat)
+		"""
 	plt.show()
+
+def processDic(tle, yr, month, day, hour, minute, LEO, MEO, m, slat, slong):
+	name = tle[0]
+	L1 = tle[1]
+	L2 = tle[2]
+	
+	#Evaluate the debris path 
+	time = ts.utc(yr, month, day, hour, range(minute,minute+10))
+
+	satl = EarthSatellite(L1,L2)
+	satlloc = satl.at(time)
+	satl_alt = satlloc.distance().km - 6371	#Get satellite altitude by subtracing earth's mean radius (km)
+	#Scrub satellites that are above destination altitude
+	if LEO and satl_alt.all() > 2000:
+		return
+	if MEO and satl_alt.all() > 36786:
+		return
+	sub = satlloc.subpoint()
+	lon = sub.longitude.degrees
+	lat = sub.latitude.degrees
+	#print((lon))
+	breaks   = np.where(np.abs(lon[1:]-lon[:-1]) > 30)  #don't plot wrap-around
+	lon, lat    = lon[:-1], lat[:-1]
+	lon[breaks] = np.nan
+
+	#Scrub ground tracks that do not appear within our mappable window
+	#Check the first longtitude
+	if np.isnan(lon[0]) or lon[0] < m.llcrnrlon or lon[0] > m.urcrnrlon:
+		end = lon[len(lon)-1]
+		#Check the last longtitude
+		if np.isnan(end) or end < m.llcrnrlon or end > m.urcrnrlon:
+			#If both fall outside of our boundary, don't plot it
+			return
+	#Do the same with latitudes
+	if np.isnan(lat[0]) or lat[0] < m.llcrnrlat or lat[0] > m.urcrnrlat:
+		end = lat[len(lat)-1]
+		if np.isnan(end) or end < m.llcrnrlat or end > m.urcrnrlat:
+			return
+
+	#Calculate distance between ground plot and launch site using haversine formula
+	distances = haversine(lat,lon,slat,slong)
+	np.seterr(all = "ignore")
+	closest_km = np.nanmin(distances)
+	if np.isnan(closest_km):	#I need to suppress the RunTimeWarning error message at some point
+		return
+	idx_closest_km = np.nanargmin(distances)
+	timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
+
+	entry = (lon, lat, name)
+	plotQ.put(entry)
 
 #implement client/server model
 
@@ -166,15 +241,41 @@ celestrak_lists = ['active','geo','amateur','analyst','argos','beidou','2012-044
 dic = {}
 
 #This is a queue that is populated with elements from celestrak_lists periodically for threads to action
-listQ = Queue()
-listQlock = threading.Lock()
-cond = threading.Condition()	#Condition object
+#listQ = Queue()
+#listQlock = threading.Lock()
+#cond = threading.Condition()	#Condition object
 
-def threadtask():
+def updateDic(celestrak_element):
+	item = celestrak_element
+	req = requests.get("http://celestrak.com/NORAD/elements/" + item + ".txt")
+	if req.status_code == 200:
+		tle = req.text.splitlines()
+		#Process the response from celestrak, updating the 
+		for idx,line in enumerate(tqdm(tle)):
+			if idx%3 == 0:
+				name = line.strip()	#Removes trailing white space
+				L1 = tle[idx+1]
+				L2 = tle[idx+2]
+				catnum = L2.split()[1]
+				if catnum in dic.keys():
+					#Indicates an update to the database
+					if L1 != dic[catnum][1] or L2 != dic[catnum][2]:
+						dic[catnum] = (name, L1, L2)
+					#Indicates a new entry
+					else:
+						continue
+				else:
+					dic[catnum] = (name, L1, L2)
+	else:
+		print("[-] " + item + " not found!")
+
+def threadtask(yr,month,day,hour,minute,LEO,MEO,m,slat,slong):
 	#Keep processing satlists until they have all been processed
 	while True:
-		if not (listQ.empty()):
-			item = listQ.get()
+		if not (dicQ.empty()):
+			item = dicQ.get()
+			processDic(item,yr,month,day,hour,minute, LEO, MEO, m, slat, slong)
+			"""
 			req = requests.get("http://celestrak.com/NORAD/elements/" + item + ".txt")
 			if req.status_code == 200:
 				tle = req.text.splitlines()
@@ -190,16 +291,18 @@ def threadtask():
 						else:
 							dic[catnum] = (name, L1, L2)
 			#listQ.task_done()
+		"""
 		else:
 			print("EXITING")
 			break
-start = time.time()
+
 #Populate listQ	
-for satlist in celestrak_lists:
-	listQ.put(satlist)
+#for satlist in celestrak_lists:
+#	listQ.put(satlist)
 print()
 print("##############")
 print()
+"""
 #Create threadpool
 for x in range(1):
 	thread = threading.Thread(target = threadtask)
@@ -208,14 +311,14 @@ for x in range(1):
 	thread.join()	#This has all the threads rejoin after all of the requests are processed
 
 print(len(dic))
-end = time.time()
 
-print(end - start)
-
+"""
 def updateDatabase():
 	dbLOCK.acquire()
 	try:
 		print("LOCK ACQUIRED")
+		for trak in celestrak_lists:
+			updateDic(trak)
 	finally:
 		print("LOCK RELEASED")
 		dbLOCK.release()
@@ -228,11 +331,11 @@ for satlist in celestrak_lists:
 print("DONE")
 
 """
-
+#Updates the dic data structure every 30 seconds (probably could afford to wait longer...)
 def testDB():
 	while True:
 		updateDatabase()
-		time.sleep(5)
+		time.sleep(30)
 
 #db_thread = threading.Timer(10.0, updateDatabase).start()
 db_thread = threading.Thread(target=testDB).start()
@@ -265,7 +368,12 @@ while True:
 					msite = client_msg[5]
 					morbit = client_msg[6]
 					print(siteSelect(msite))
-					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
+					#Try to process request (in case received mid-update)
+					try:
+						dbLOCK.acquire()
+						processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
+					finally:
+						dbLOCK.release()
 					#processRequest()
 					break
 				conn.sendall(data)
