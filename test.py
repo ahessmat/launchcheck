@@ -10,6 +10,8 @@ from skyfield.timelib import Time
 import matplotlib.pyplot as plt	#needed for matplotlib
 from mpl_toolkits.basemap import Basemap	#needed for projecting globe graphic
 import numpy as np
+import multiprocessing
+import os
 
 
 #Server overhead
@@ -59,9 +61,9 @@ def siteSelect(s):
 	sites = {
 		"1" : (34.7373367,-120.5843126, "Vandenberg"),	#Vandenberg
 		"2" : (28.396837,-80.605659, "Cape Canaveral"),	#Cape Canaveral
-		"3" : (110.951133,19.614492, "Wengchang Space Launch Site"),
-		"4" : (63.305000,45.965000, "Baikonur Cosmodrome"),
-		"5" : (80.230425,13.719939, "Satish Dhawan Space Centre")
+		"3" : (19.614492,110.951133, "Wengchang Space Launch Site"),
+		"4" : (45.965000,63.305000, "Baikonur Cosmodrome"),
+		"5" : (13.719939,80.230425, "Satish Dhawan Space Centre")
 	}
 	#slat,slong,siteName = sites[s]
 	#return (slat,slong,siteName)
@@ -70,6 +72,7 @@ def siteSelect(s):
 dicQ = Queue()
 plotQ = Queue()
 def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
+	print("[+] Processing request")
 	"""
 	yr = 2022
 	month = 12
@@ -102,12 +105,12 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 	#Plot the launch site
 	plt.scatter(slong,slat)
 	plt.annotate(siteName, (slong,slat))
-
+	"""
 	#####################
 	#MULTITHREADING
 	#####################
 
-	print("[+] Processing request")
+	#print("[+] Processing request")
 	for tle in dic.values():
 		dicQ.put(tle)
 	for x in tqdm(range(10)):
@@ -149,21 +152,6 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 		lon, lat    = lon[:-1], lat[:-1]
 		lon[breaks] = np.nan
 
-		#Calculate distance between ground plot and launch site using haversine formula
-		distances = haversine(lat,lon,slat,slong)
-		np.seterr(all = "ignore")
-		closest_km = np.nanmin(distances)
-		if np.isnan(closest_km):	#I need to suppress the RunTimeWarning error message at some point
-			continue
-		idx_closest_km = np.nanargmin(distances)
-		timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
-
-		#TODO
-		#Matplotlib is not threadsafe
-		#Have threads push plot arguments to a queue, then plot in unified process
-		p = plt.plot(lon,lat, label=name)
-		color = getColor(p[-1].get_color())
-
 		#Scrub ground tracks that do not appear within our mappable window
 		#Check the first longtitude
 		if np.isnan(lon[0]) or lon[0] < m.llcrnrlon or lon[0] > m.urcrnrlon:
@@ -178,9 +166,23 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 			if np.isnan(end) or end < m.llcrnrlat or end > m.urcrnrlat:
 				continue
 
-		#tracker.append((name,closest_km,timestamp,color, satl_alt[idx_closest_km]))
-		#plt.scatter(lon,lat)
-		"""
+		#Calculate distance between ground plot and launch site using haversine formula
+		distances = haversine(lat,lon,slat,slong)
+		np.seterr(all = "ignore")
+		closest_km = np.nanmin(distances)
+		if np.isnan(closest_km):	#I need to suppress the RunTimeWarning error message at some point
+			continue
+		idx_closest_km = np.nanargmin(distances)
+		timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
+
+		#TODO
+		#Matplotlib is not threadsafe
+		#Have threads push plot arguments to a queue, then plot in unified process
+		p = plt.plot(lon,lat, label=name)
+		color = getColor(p[-1].get_color())
+		
+	dbLOCK.release()
+	print("LOCK RELEASED")
 	plt.show()
 
 def processDic(tle, yr, month, day, hour, minute, LEO, MEO, m, slat, slong):
@@ -239,6 +241,7 @@ def processDic(tle, yr, month, day, hour, minute, LEO, MEO, m, slat, slong):
 celestrak_lists = ['active','geo','amateur','analyst','argos','beidou','2012-044','cosmos-2251-debris','cubesat','dmc','resource','education','engineering','1999-025','galileo','geodetic','globalstar','glo-ops','gnss','goes','gorizont','gps-ops','2019-006','intelsat','iridium','iridium-33-debris','iridium-NEXT','tle-new','military','molniya','nnss','noaa','oneweb','orbcomm','other','other-comm','planet','radar','raduga','musson','sbas','satnogs','sarsat','ses','science','stations','spire','starlink','tdrss','weather']
 
 dic = {}
+#dic = multiprocessing.Manager().dict()
 
 #This is a queue that is populated with elements from celestrak_lists periodically for threads to action
 #listQ = Queue()
@@ -315,37 +318,44 @@ print(len(dic))
 """
 def updateDatabase():
 	dbLOCK.acquire()
-	try:
-		print("LOCK ACQUIRED")
-		for trak in celestrak_lists:
-			updateDic(trak)
-	finally:
-		print("LOCK RELEASED")
-		dbLOCK.release()
 
-"""
-for satlist in celestrak_lists:
-	req = requests.get("http://celestrak.com/NORAD/elements/" + satlist + ".txt")
-	if req.status_code == 200:
-		dic[satlist] = req.text
-print("DONE")
+	print("[+] LOCK ACQUIRED")
+	for trak in celestrak_lists:
+		updateDic(trak)
+	dbLOCK.release()
+	print("[+] Update Finished, releasing lock")
 
-"""
 #Updates the dic data structure every 30 seconds (probably could afford to wait longer...)
 def testDB():
 	while True:
 		updateDatabase()
 		time.sleep(30)
 
+
 #db_thread = threading.Timer(10.0, updateDatabase).start()
 db_thread = threading.Thread(target=testDB).start()
+print("STARTING SERVER")
 s_time = datetime.now()
+#TODO, have sockets push info into queue, multiprocess the queue
+#requestQ = multiprocessing.Queue()
+#requestQ = Queue()
+
+#the_pool = multiprocessing.Pool(3, handleRequest,(requestQ,))
+#p1 = multiprocessing.Process(target=handleRequest, args=(requestQ,))
+#p1.start()
+
 while True:
-	print("TEST")
 	with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+		s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		s.bind((HOST,PORT))
 		s.listen()
 		conn, addr = s.accept()
+		"""
+		print("[+] Accepted connection, starting new process")
+		sock_process = multiprocessing.Process(target=sockprocess, args=(conn,addr))
+		sock_process.daemon = True
+		sock_process.start()
+		"""
 		msg = ""
 		with conn:
 			print('Connected by', addr)
@@ -369,16 +379,18 @@ while True:
 					morbit = client_msg[6]
 					print(siteSelect(msite))
 					#Try to process request (in case received mid-update)
+					"""
 					try:
 						dbLOCK.acquire()
 						processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
 					finally:
 						dbLOCK.release()
+					"""
+					#requestQ.put((myr, mmonth, mday, mhour, mmin, msite, morbit))
+					dbLOCK.acquire()
+					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
+					#dbLOCK.release()
 					#processRequest()
 					break
 				conn.sendall(data)
-
-
-
-def test():
-	print("WORKS")
+		
