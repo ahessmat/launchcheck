@@ -105,29 +105,7 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 	#Plot the launch site
 	plt.scatter(slong,slat)
 	plt.annotate(siteName, (slong,slat))
-	"""
-	#####################
-	#MULTITHREADING
-	#####################
 
-	#print("[+] Processing request")
-	for tle in dic.values():
-		dicQ.put(tle)
-	for x in tqdm(range(10)):
-		thread = threading.Thread(target = threadtask, args=[yr,month,day,hour,minute,LEO,MEO,m,slat,slong])
-		#thread.daemon = True
-		thread.start()
-		thread.join()
-	print("[+] Plotting to figure")
-	while not plotQ.empty():
-		lon,lat,name = plotQ.get()
-		p = plt.plot(lon,lat, label=name)
-		color = getColor(p[-1].get_color())
-	#####################
-	#MULTITHREADING
-	#####################
-
-	"""
 	for tle in tqdm(dic.values()):
 		name = tle[0]
 		L1 = tle[1]
@@ -185,55 +163,6 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 	print("LOCK RELEASED")
 	plt.show()
 
-def processDic(tle, yr, month, day, hour, minute, LEO, MEO, m, slat, slong):
-	name = tle[0]
-	L1 = tle[1]
-	L2 = tle[2]
-	
-	#Evaluate the debris path 
-	time = ts.utc(yr, month, day, hour, range(minute,minute+10))
-
-	satl = EarthSatellite(L1,L2)
-	satlloc = satl.at(time)
-	satl_alt = satlloc.distance().km - 6371	#Get satellite altitude by subtracing earth's mean radius (km)
-	#Scrub satellites that are above destination altitude
-	if LEO and satl_alt.all() > 2000:
-		return
-	if MEO and satl_alt.all() > 36786:
-		return
-	sub = satlloc.subpoint()
-	lon = sub.longitude.degrees
-	lat = sub.latitude.degrees
-	#print((lon))
-	breaks   = np.where(np.abs(lon[1:]-lon[:-1]) > 30)  #don't plot wrap-around
-	lon, lat    = lon[:-1], lat[:-1]
-	lon[breaks] = np.nan
-
-	#Scrub ground tracks that do not appear within our mappable window
-	#Check the first longtitude
-	if np.isnan(lon[0]) or lon[0] < m.llcrnrlon or lon[0] > m.urcrnrlon:
-		end = lon[len(lon)-1]
-		#Check the last longtitude
-		if np.isnan(end) or end < m.llcrnrlon or end > m.urcrnrlon:
-			#If both fall outside of our boundary, don't plot it
-			return
-	#Do the same with latitudes
-	if np.isnan(lat[0]) or lat[0] < m.llcrnrlat or lat[0] > m.urcrnrlat:
-		end = lat[len(lat)-1]
-		if np.isnan(end) or end < m.llcrnrlat or end > m.urcrnrlat:
-			return
-
-	#Calculate distance between ground plot and launch site using haversine formula
-	distances = haversine(lat,lon,slat,slong)
-	np.seterr(all = "ignore")
-	closest_km = np.nanmin(distances)
-	if np.isnan(closest_km):	#I need to suppress the RunTimeWarning error message at some point
-		return
-	idx_closest_km = np.nanargmin(distances)
-	timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
-
-	entry = (lon, lat, name)
-	plotQ.put(entry)
 
 #implement client/server model
 
@@ -272,32 +201,7 @@ def updateDic(celestrak_element):
 	else:
 		print("[-] " + item + " not found!")
 
-def threadtask(yr,month,day,hour,minute,LEO,MEO,m,slat,slong):
-	#Keep processing satlists until they have all been processed
-	while True:
-		if not (dicQ.empty()):
-			item = dicQ.get()
-			processDic(item,yr,month,day,hour,minute, LEO, MEO, m, slat, slong)
-			"""
-			req = requests.get("http://celestrak.com/NORAD/elements/" + item + ".txt")
-			if req.status_code == 200:
-				tle = req.text.splitlines()
-				#Process the response from celestrak, updating the 
-				for idx,line in enumerate(tqdm(tle)):
-					if idx%3 == 0:
-						name = line.strip()	#Removes trailing white space
-						L1 = tle[idx+1]
-						L2 = tle[idx+2]
-						catnum = L2.split()[1]
-						if catnum in dic.keys():
-							continue
-						else:
-							dic[catnum] = (name, L1, L2)
-			#listQ.task_done()
-		"""
-		else:
-			print("EXITING")
-			break
+
 
 #Populate listQ	
 #for satlist in celestrak_lists:
@@ -389,6 +293,7 @@ while True:
 					#requestQ.put((myr, mmonth, mday, mhour, mmin, msite, morbit))
 					dbLOCK.acquire()
 					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
+					print("THIS IS WHEN DATA IS SENT")
 					#dbLOCK.release()
 					#processRequest()
 					break
