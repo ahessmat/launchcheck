@@ -13,6 +13,7 @@ import numpy as np
 import multiprocessing
 import os
 
+print("STARTING PROGRAM")
 
 #Server overhead
 HOST = '127.0.0.1'
@@ -22,7 +23,8 @@ data = load('de421.bsp')	#skyfield intuits that it needs to download this file; 
 ts = load.timescale()
 earth = data['earth']
 #Database lock
-dbLOCK = threading.Lock()
+#dbLOCK = threading.Lock()
+dbLOCK = multiprocessing.Lock()
 
 #TODO
 #implement multi-threaded calls to celestrak
@@ -69,8 +71,6 @@ def siteSelect(s):
 	#return (slat,slong,siteName)
 	return(sites[s])
 
-dicQ = Queue()
-plotQ = Queue()
 def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 	print("[+] Processing request")
 	"""
@@ -87,6 +87,7 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 	"""
 	#conn.sendall("TEST1\r\nTEST2\r\n\r\n".encode())
 	tracker= []
+	#tracker = multiprocessing.Manager().list()
 	yr = int(myr)
 	month = int(mmo)
 	day = int(mday)
@@ -107,27 +108,25 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 	#Plot the launch site
 	plt.scatter(slong,slat)
 	plt.annotate(siteName, (slong,slat))
-
+	
 	for tle in tqdm(dic.values()):
 		name = tle[0]
 		L1 = tle[1]
 		L2 = tle[2]
 		
 		#Evaluate the debris path 
-		time = ts.utc(yr, month, day, hour, range(minute,minute+10))
+		#time = ts.utc(yr, month, day, hour, range(minute,minute+10))
+		time = ts.utc(yr, month, day, hour, minute, range(0,360,20))	#plot by 20sec increments
 
+		################
+		#SPEED
+		################
 		satl = EarthSatellite(L1,L2)
 		satlloc = satl.at(time)
-		satl_alt = satlloc.distance().km - 6371	#Get satellite altitude by subtracing earth's mean radius (km)
-		#Scrub satellites that are above destination altitude
-		if LEO and satl_alt.all() > 2000:
-			continue
-		if MEO and satl_alt.all() > 36786:
-			continue
 		sub = satlloc.subpoint()
 		lon = sub.longitude.degrees
 		lat = sub.latitude.degrees
-		#print((lon))
+
 		breaks   = np.where(np.abs(lon[1:]-lon[:-1]) > 30)  #don't plot wrap-around
 		lon, lat    = lon[:-1], lat[:-1]
 		lon[breaks] = np.nan
@@ -146,6 +145,20 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 			if np.isnan(end) or end < m.llcrnrlat or end > m.urcrnrlat:
 				continue
 
+		##################
+		#SPEED
+		##################
+
+		#satl = EarthSatellite(L1,L2)
+		#satlloc = satl.at(time)
+		satl_alt = satlloc.distance().km - 6371	#Get satellite altitude by subtracing earth's mean radius (km)
+
+		#Scrub satellites that are above destination altitude
+		if LEO and satl_alt.all() > 2000:
+			continue
+		if MEO and satl_alt.all() > 36786:
+			continue
+
 		#Calculate distance between ground plot and launch site using haversine formula
 		distances = haversine(lat,lon,slat,slong)
 		np.seterr(all = "ignore")
@@ -153,15 +166,17 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 		if np.isnan(closest_km):	#I need to suppress the RunTimeWarning error message at some point
 			continue
 		idx_closest_km = np.nanargmin(distances)
-		timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
+		#timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute+idx_closest_km)
+		mins = minute + (idx_closest_km * 20 // 60)
+		secs = (idx_closest_km * 20) % 60
+		timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(mins) + ":" + str(secs)
 
-		#TODO
 		#Matplotlib is not threadsafe
 		#Have threads push plot arguments to a queue, then plot in unified process
 		p = plt.plot(lon,lat, label=name)
 		color = getColor(p[-1].get_color())
 		tracker.append((name,closest_km,timestamp,color, satl_alt[idx_closest_km]))
-		
+
 	#dbLOCK.release()
 	print("LOCK RELEASED")
 	sortedTracker = sorted(tracker, key = lambda x: x[1])
@@ -175,7 +190,7 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 		time = sortedTracker[idx][2]
 		color = sortedTracker[idx][3]
 		altitude = str(round(sortedTracker[idx][4], 2))
-		msg += name + " passes within " +  closest + "km of the launch destination at " + time + " with altitude " + altitude + ". Plot color: " + color + "\r\n"
+		msg += name + " passes within " +  closest + "km of the launchsite at " + time + " with altitude " + altitude + ". Plot color: " + color + "\r\n"
 		idx += 1
 		dist = sortedTracker[idx][1]
 	msg += "\r\n"
@@ -188,8 +203,8 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 #Identifies the various lists managed by Celestrak
 celestrak_lists = ['active','geo','amateur','analyst','argos','beidou','2012-044','cosmos-2251-debris','cubesat','dmc','resource','education','engineering','1999-025','galileo','geodetic','globalstar','glo-ops','gnss','goes','gorizont','gps-ops','2019-006','intelsat','iridium','iridium-33-debris','iridium-NEXT','tle-new','military','molniya','nnss','noaa','oneweb','orbcomm','other','other-comm','planet','radar','raduga','musson','sbas','satnogs','sarsat','ses','science','stations','spire','starlink','tdrss','weather']
 
-dic = {}
-#dic = multiprocessing.Manager().dict()
+#dic = {}
+dic = multiprocessing.Manager().dict()
 
 #This is a queue that is populated with elements from celestrak_lists periodically for threads to action
 #listQ = Queue()
@@ -228,17 +243,7 @@ def updateDic(celestrak_element):
 print()
 print("##############")
 print()
-"""
-#Create threadpool
-for x in range(1):
-	thread = threading.Thread(target = threadtask)
-	#thread.daemon = True
-	thread.start()
-	thread.join()	#This has all the threads rejoin after all of the requests are processed
 
-print(len(dic))
-
-"""
 def updateDatabase():
 	dbLOCK.acquire()
 
@@ -248,24 +253,19 @@ def updateDatabase():
 	dbLOCK.release()
 	print("[+] Update Finished, releasing lock")
 
-#Updates the dic data structure every 30 seconds (probably could afford to wait longer...)
+#Updates the dic data structure every 120 seconds (probably could afford to wait longer...)
 def testDB():
 	while True:
 		updateDatabase()
-		time.sleep(30)
+		time.sleep(120)
 
 
 #db_thread = threading.Timer(10.0, updateDatabase).start()
-db_thread = threading.Thread(target=testDB).start()
+#db_thread = threading.Thread(target=testDB).start()	#Faster than multiprocessing, but creates errors with matplotlib (which is not threadsafe)
+db_thread = multiprocessing.Process(target=testDB).start()
 print("STARTING SERVER")
 s_time = datetime.now()
-#TODO, have sockets push info into queue, multiprocess the queue
-#requestQ = multiprocessing.Queue()
-#requestQ = Queue()
 
-#the_pool = multiprocessing.Pool(3, handleRequest,(requestQ,))
-#p1 = multiprocessing.Process(target=handleRequest, args=(requestQ,))
-#p1.start()
 
 while True:
 	with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -273,12 +273,7 @@ while True:
 		s.bind((HOST,PORT))
 		s.listen()
 		conn, addr = s.accept()
-		"""
-		print("[+] Accepted connection, starting new process")
-		sock_process = multiprocessing.Process(target=sockprocess, args=(conn,addr))
-		sock_process.daemon = True
-		sock_process.start()
-		"""
+
 		msg = ""
 		with conn:
 			print('Connected by', addr)
@@ -303,19 +298,10 @@ while True:
 					morbit = client_msg[6]
 					print(siteSelect(msite))
 					#Try to process request (in case received mid-update)
-					"""
-					try:
-						dbLOCK.acquire()
-						processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
-					finally:
-						dbLOCK.release()
-					"""
-					#requestQ.put((myr, mmonth, mday, mhour, mmin, msite, morbit))
+
 					dbLOCK.acquire()
 					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit, conn)
-					#print("THIS IS WHEN DATA IS SENT")
 					dbLOCK.release()
-					#processRequest()
 					break
 				#conn.sendall(data)
 				#conn.send(data)

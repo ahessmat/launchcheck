@@ -120,16 +120,22 @@ site = parsed.site
 #ARGUMENT PARSING & HANDLING END
 ###################
 
-print(yr)
-print(month)
-print(day)
-print(hour)
-print(minute)
-#print(slat)
-#print(slong)
-#print(siteName)
-print(LEO)
-print(MEO)
+def siteSelect(s):
+	#LATITUDE, LONGITUTE, SITENAME
+	sites = {
+		"1" : (34.7373367,-120.5843126, "Vandenberg"),	#Vandenberg
+		"2" : (28.396837,-80.605659, "Cape Canaveral"),	#Cape Canaveral
+		"3" : (19.614492,110.951133, "Wengchang Space Launch Site"),
+		"4" : (45.965000,63.305000, "Baikonur Cosmodrome"),
+		"5" : (13.719939,80.230425, "Satish Dhawan Space Centre")
+	}
+	#slat,slong,siteName = sites[s]
+	#return (slat,slong,siteName)
+	return(sites[s])
+
+
+timestamp = str(yr) + "-" + str(month) + "-" + str(day) + " " + str(hour) + ":" + str(minute)
+print("Launching from " + siteSelect(site)[2] + " at " + timestamp + " into " + orbit)
 
 HOST = '127.0.0.1'
 PORT = 10001
@@ -147,5 +153,5 @@ with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
 		if "\r\n\r\n" in data.decode():
 			break
 		
-	print('Received: ' + fulldata)	
+	print('Received:\r\n' + fulldata)	
 #print('Received', repr(data))
