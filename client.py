@@ -138,6 +138,14 @@ msg = str(yr) + " " + str(month) + " " + str(day) + " " + str(hour) + " " + str(
 
 with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as s:
 	s.connect((HOST, PORT))
-	s.sendall((msg).encode())
-	data = s.recv(1024)
-print('Received', repr(data))
+	s.sendall((msg+"\r\n").encode())
+	#data = s.recv(1024)
+	fulldata = ''
+	while True:
+		data = s.recv(1024)
+		fulldata += data.decode()
+		if "\r\n\r\n" in data.decode():
+			break
+		
+	print('Received: ' + fulldata)	
+#print('Received', repr(data))

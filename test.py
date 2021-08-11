@@ -71,7 +71,7 @@ def siteSelect(s):
 
 dicQ = Queue()
 plotQ = Queue()
-def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
+def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit, conn):
 	print("[+] Processing request")
 	"""
 	yr = 2022
@@ -85,6 +85,8 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 	LEO = False
 	MEO = False
 	"""
+	#conn.sendall("TEST1\r\nTEST2\r\n\r\n".encode())
+	tracker= []
 	yr = int(myr)
 	month = int(mmo)
 	day = int(mday)
@@ -158,9 +160,26 @@ def processRequest(myr, mmo, mday, mhour, mmin, msite, morbit):
 		#Have threads push plot arguments to a queue, then plot in unified process
 		p = plt.plot(lon,lat, label=name)
 		color = getColor(p[-1].get_color())
+		tracker.append((name,closest_km,timestamp,color, satl_alt[idx_closest_km]))
 		
-	dbLOCK.release()
+	#dbLOCK.release()
 	print("LOCK RELEASED")
+	sortedTracker = sorted(tracker, key = lambda x: x[1])
+	dist = 0
+	idx = 0
+	msg = ""
+	msg += "The following near misses will occur:\r\n"
+	while dist < 200:
+		name = sortedTracker[idx][0]
+		closest = str(round(sortedTracker[idx][1], 2))
+		time = sortedTracker[idx][2]
+		color = sortedTracker[idx][3]
+		altitude = str(round(sortedTracker[idx][4], 2))
+		msg += name + " passes within " +  closest + "km of the launch destination at " + time + " with altitude " + altitude + ". Plot color: " + color + "\r\n"
+		idx += 1
+		dist = sortedTracker[idx][1]
+	msg += "\r\n"
+	conn.sendall(msg.encode())
 	plt.show()
 
 
@@ -270,7 +289,8 @@ while True:
 				#if "\r\n\r\n" in msg:
 					#print(msg)
 					#print("END")
-				if not data:
+				#if not data:
+				if "\r\n" in data.decode():
 					print((datetime.now() - s_time).total_seconds())
 					print(msg)
 					client_msg = msg.split(" ")
@@ -292,10 +312,11 @@ while True:
 					"""
 					#requestQ.put((myr, mmonth, mday, mhour, mmin, msite, morbit))
 					dbLOCK.acquire()
-					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit)
-					print("THIS IS WHEN DATA IS SENT")
-					#dbLOCK.release()
+					processRequest(myr, mmonth, mday, mhour, mmin, msite, morbit, conn)
+					#print("THIS IS WHEN DATA IS SENT")
+					dbLOCK.release()
 					#processRequest()
 					break
-				conn.sendall(data)
+				#conn.sendall(data)
+				#conn.send(data)
 		
