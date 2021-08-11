@@ -14,17 +14,29 @@ The program leverages a client/server interaction on the local machine communica
 The user may pass a variety of arguments to client.py, customizing the launch site location and time of the launch. After submitting the arguments from the command line, client.py passes the arguments to server.py, which processes the request on client.py's behalf.
 
 optional arguments:
+
   -h, --help            show this help message and exit
+  
   -d DATE, --date DATE  Date of launch (YYYY-MM-DD)
+  
   -t TIME, --time TIME  Time of launch (0000 thru 2359)
+  
   -s {1,2,3,4,5}, --site {1,2,3,4,5}
+  
 	(1) Vandenberg
+	
 	(2) Cape Canaveral
+	
 	(3) Wengchang Space Launch Site
+	
 	(4) Baikonur Cosmodrome
+	
 	(5) Satish Dhawan Space Centre
+	
   -L                    LEO: Launch will stay under 2000km
+  
   -M                    MEO: Launch altitude is 2000km < alt < 35,786km
+  
   -G                    GEO: Launch altitude is greater than 36,786km; this is the default
 
 
